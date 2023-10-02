@@ -1,6 +1,7 @@
 -- This is introvert1337's teleport script but using lerp. Have fun!
 local replicated_storage = game:GetService("ReplicatedStorage");
 local run_service = game:GetService("RunService");
+local pathfinding_service = game:GetService("PathfindingService");
 local players = game:GetService("Players");
 local tween_service = game:GetService("TweenService");
 
@@ -10,6 +11,7 @@ local dependencies = {
     variables = {
         up_vector = Vector3.new(0, 500, 0),
         raycast_params = RaycastParams.new(),
+        path = pathfinding_service:CreatePath({WaypointSpacing = 3}),
         player_speed = 150, 
         vehicle_speed = 450,
         teleporting = false,
@@ -46,6 +48,7 @@ end;
 --// function to get the nearest vehicle that can be entered
 
 function utilities:get_nearest_vehicle(tried) -- unoptimized
+local suc, err = pcall(function()
     local nearest;
     local distance = math.huge;
 
@@ -69,15 +72,80 @@ function utilities:get_nearest_vehicle(tried) -- unoptimized
     end;
 
     return nearest;
+end)
+if err then
+utilities:get_nearest_vehicle(tried ~= nil and tried)
+return
+end
 end;
 
+--// function to pathfind to a position with no collision above
+
+function movement:pathfind(tried)
+local suc, err = pcall(function()
+    local distance = math.huge;
+    local nearest;
+
+    local tried = tried or { };
+    
+    for index, value in next, dependencies.door_positions do -- find the nearest position in our list of positions without collision above
+        if not table.find(tried, value) then
+            local magnitude = (value.position - player.Character.HumanoidRootPart.Position).Magnitude;
+            
+            if magnitude < distance then 
+                distance = magnitude;
+                nearest = value;
+            end;
+        end;
+    end;
+
+    table.insert(tried, nearest);
+
+    utilities:toggle_door_collision(nearest.instance, false);
+
+    local path = dependencies.variables.path;
+    path:ComputeAsync(player.Character.HumanoidRootPart.Position, nearest.position);
+
+    if path.Status == Enum.PathStatus.Success then -- if path making is successful
+        local waypoints = path:GetWaypoints();
+
+        for index = 1, #waypoints do 
+            local waypoint = waypoints[index];
+            
+            player.Character.HumanoidRootPart.CFrame = CFrame.new(waypoint.Position + Vector3.new(0, 2.5, 0)); -- walking movement is less optimal
+
+            if not workspace:Raycast(player.Character.HumanoidRootPart.Position, dependencies.variables.up_vector, dependencies.variables.raycast_params) then -- if there is nothing above the player
+                utilities:toggle_door_collision(nearest.instance, true);
+
+                return;
+            end;
+
+            task.wait(0.05);
+        end;
+    end;
+
+    utilities:toggle_door_collision(nearest.instance, true);
+
+    movement:pathfind(tried);
+end)
+if err then
+movement:pathfind(tried ~= nil and tried)
+return
+end
+end;
 
 --// function to interpolate characters position to a position
 
 function movement:move_to_position(Part, cframe, speed, car, target_vehicle, tried_vehicles)
+local suc, err = pcall(function()
+
     local vector_position = cframe.Position;
     
-    
+    if not car and workspace:Raycast(Part.Position, dependencies.variables.up_vector, dependencies.variables.raycast_params) then -- if there is an object above us, use pathfind function to get to a position with no collision above
+        movement:pathfind();
+        task.wait(0.5);
+    end;
+    local Speed = speed
     local y_level = 500;
     local higher_position = Vector3.new(vector_position.X, y_level, vector_position.Z); -- 500 studs above target position
  local start = Part.CFrame
@@ -85,6 +153,7 @@ function movement:move_to_position(Part, cframe, speed, car, target_vehicle, tri
 task.spawn(function()
 if TeleportUp ~= nil then
  repeat
+     Speed = car == true and dependencies.variables.vehicle_speed or dependencies.variables.player_speed
 Part.CFrame = CFrame.new(Part.CFrame.X, y_level, Part.CFrame.Z)
 Part.Velocity = Vector3.new()
 
@@ -94,7 +163,7 @@ task.wait()
     Part.Velocity = Vector3.zero
 end
 end)
- for i = 0, 1, (speed / distance) * 1 / 45 do
+ for i = 0, 1, (Speed / distance) * 1 / 45 do
      if not Part:FindFirstChild('Seat') or (Part:FindFirstChild("Seat") and Part.Seat.PlayerName.Value == user.Name) then
    local new_position = start:lerp(cframe, i)
    Part:PivotTo(new_position)
@@ -104,6 +173,11 @@ Part.Velocity = Vector3.new()
    end
  end
  Part:PivotTo(CFrame.new(Part.Position.X, vector_position.Y, Part.Position.Z))
+end)
+if err then
+movement:move_to_position(Part ~= nil and Part, cframe ~= nil and cframe, speed ~= nil and speed, car ~= nil and car, target_vehicle ~= nil and target_vehicle, tried_vehicles ~= nil and tried_vehicles)
+return
+end
 end;
 
 --// raycast filter
@@ -187,6 +261,7 @@ end);
 --// main teleport function (not returning a new function directly because of recursion)
 
 function dependencies:teleport(cframe, tried) -- unoptimized
+local suc, err = pcall(function()
 for _, v in pairs(game:GetService("Workspace").Vehicles:GetChildren()) do
 if v:FindFirstChild('_VehicleState_'..game:GetService('Players').LocalPlayer.Name) then
 movement:move_to_position(v.PrimaryPart, cframe, dependencies.variables.vehicle_speed);
@@ -246,5 +321,10 @@ end
 
     task.wait(0.5);
     dependencies.variables.teleporting = false;
+end)
+if err then
+dependencies:teleport(cframe ~= nil and cframe, tried ~= nil and tried)
+return
+end
 end;
 return dependencies
